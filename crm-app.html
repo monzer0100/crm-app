@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple CRM (HTML/CSS/JS)</title>
+  <style>
+    :root{--bg:#f6f8fb;--card:#ffffff;--muted:#6b7280;--accent:#2563eb}
+    *{box-sizing:border-box}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial; margin:0; background:var(--bg); color:#0f172a}
+    .app{max-width:1100px;margin:28px auto;padding:20px}
+    span{background: #0d6efd;width: 100%;display:flex;color: white;padding: 1rem;text-align: center;}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    h1{font-size:20px;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:var(--accent);color:#fff;padding:8px 12px;border-radius:10px;border:0;cursor:pointer}
+    .btn.ghost{background:transparent;color:var(--accent);border:1px solid rgba(37,99,235,.15)}
+    .card{background:var(--card);border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(2,6,23,.06)}
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:16px}
+    .search{display:flex;gap:8px;margin-bottom:12px}
+    input[type=text], input[type=email], input[type=tel], textarea, select{width:100%;padding:10px;border-radius:8px;border:1px solid #e6edf6}
+    .list{max-height:560px;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px}
+    .contact{display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;border:1px solid #f0f4fb}
+    .avatar{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#eef2ff;color:#3730a3;font-weight:700}
+    .meta{flex:1}
+    .meta h3{margin:0;font-size:15px}
+    .meta p{margin:2px 0 0;font-size:13px;color:var(--muted)}
+    .meta .tag{display:inline-block;margin-top:6px;padding:4px 8px;background:#f3f4f6;border-radius:999px;font-size:12px;color:#374151}
+    .small{font-size:12px;color:var(--muted)}
+    .actions{display:flex;gap:8px}
+    .pill{padding:6px 10px;border-radius:999px;border:1px solid #eaeefb;background:#fff;cursor:pointer}
+    .form-row{display:flex;gap:8px}
+    .form-row > * {flex:1}
+    footer{margin-top:12px;display:flex;justify-content:flex-end;gap:8px}
+    .muted{color:var(--muted);font-size:13px}
+    /* responsive */
+    @media (max-width:880px){.grid{grid-template-columns:1fr;}.controls{flex-wrap:wrap}}  
+  </style>
+</head>
+<body>
+
+  <span>
+    <h1>Advertising Campaign Manager</h1>
+  </span>
+
+
+  <div class="app">
+    <header>
+      <div>
+        <h1>Simple CRM</h1>
+        <div class="muted">Contacts, quick notes, import/export — local only</div>
+      </div>
+      <div class="controls">
+        <button id="btnSample" class="btn ghost">Load Sample</button>
+        <button id="btnExport" class="btn ghost">Export CSV</button>
+        <button id="btnImport" class="btn ghost">Import CSV</button>
+        <button id="btnAdd" class="btn">+ New Contact</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <div class="search">
+          <input id="searchInput" type="text" placeholder="Search contacts by name, email, company..." />
+          <select id="sortSelect">
+            <option value="new">Sort: Newest</option>
+            <option value="alpha">Sort: A → Z</option>
+          </select>
+        </div>
+
+        <div class="list" id="contactsList" aria-live="polite"></div>
+
+        <footer>
+          <div class="muted">Saved to localStorage</div>
+        </footer>
+      </div>
+
+      <div class="card" id="rightPanel">
+        <h3 id="formTitle">Contact details</h3>
+        <div id="formWrap">
+          <div class="muted">Select a contact or create a new one.</div>
+        </div>
+      </div>
+    </div>
+
+    <input id="fileInput" type="file" accept="text/csv" style="display:none" />
+  </div>
+
+  <template id="contactTpl">
+    <div class="contact">
+      <div class="avatar"></div>
+      <div class="meta">
+        <h3></h3>
+        <p class="small"></p>
+        <div class="tag"></div>
+      </div>
+      <div class="actions"></div>
+    </div>
+  </template>
+
+  <script>
+    // Simple CRM app - vanilla JS, localStorage persistence
+    const STORAGE_KEY = 'crm_contacts_v1'
+
+    // DOM
+    const contactsList = document.getElementById('contactsList')
+    const searchInput = document.getElementById('searchInput')
+    const sortSelect = document.getElementById('sortSelect')
+    const btnAdd = document.getElementById('btnAdd')
+    const btnSample = document.getElementById('btnSample')
+    const btnExport = document.getElementById('btnExport')
+    const btnImport = document.getElementById('btnImport')
+    const formWrap = document.getElementById('formWrap')
+    const formTitle = document.getElementById('formTitle')
+    const fileInput = document.getElementById('fileInput')
+
+    let contacts = []
+    let activeId = null
+
+    // helpers
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8)
+
+    function load() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY)
+        contacts = raw ? JSON.parse(raw) : []
+      } catch(e) { contacts = [] }
+    }
+    function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(contacts)) }
+
+    function renderList() {
+      contactsList.innerHTML = ''
+      const q = searchInput.value.trim().toLowerCase()
+      const sorted = [...contacts]
+      if (sortSelect.value === 'alpha') sorted.sort((a,b)=>a.name.localeCompare(b.name))
+      else sorted.sort((a,b)=>b.created - a.created)
+
+      const filtered = sorted.filter(c => {
+        if (!q) return true
+        return (c.name||'').toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q) || (c.company||'').toLowerCase().includes(q)
+      })
+
+      if (!filtered.length) {
+        contactsList.innerHTML = '<div class="muted" style="padding:16px">No contacts — create your first contact.</div>'
+        return
+      }
+
+      for (const c of filtered) {
+        const tpl = document.getElementById('contactTpl')
+        const el = tpl.content.cloneNode(true)
+        const node = el.querySelector('.contact')
+        el.querySelector('.avatar').textContent = (c.name || '·').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase()
+        el.querySelector('h3').textContent = c.name || '(no name)'
+        el.querySelector('.small').textContent = c.email || c.phone || ''
+        el.querySelector('.tag').textContent = c.company || ''
+
+        const actions = el.querySelector('.actions')
+        const btnView = document.createElement('button'); btnView.className='pill'; btnView.textContent='View';
+        btnView.onclick = ()=> openForm('view', c.id)
+        const btnEdit = document.createElement('button'); btnEdit.className='pill'; btnEdit.textContent='Edit';
+        btnEdit.onclick = ()=> openForm('edit', c.id)
+        const btnDel = document.createElement('button'); btnDel.className='pill'; btnDel.textContent='Delete';
+        btnDel.onclick = ()=> { if(confirm('Delete this contact?')) { deleteContact(c.id) } }
+        actions.appendChild(btnView); actions.appendChild(btnEdit); actions.appendChild(btnDel)
+
+        contactsList.appendChild(el)
+      }
+    }
+    function openForm(mode, id) {
+      activeId = id || null
+      formWrap.innerHTML = ''
+      if (mode === 'create') {
+        formTitle.textContent = 'New contact'
+        formWrap.appendChild(contactForm())
+      } else {
+        const c = contacts.find(x=>x.id===id)
+        formTitle.textContent = mode === 'view' ? 'Contact details' : 'Edit contact'
+        if (!c) { formWrap.innerHTML = '<div class="muted">Contact not found.</div>'; return }
+        if (mode === 'view') {
+          const wrap = document.createElement('div')
+          wrap.innerHTML = `
+            <h2 style="margin:6px 0">${escapeHtml(c.name||'—')}</h2>
+            <div class="small">${escapeHtml(c.company||'')}</div>
+            <p class="muted" style="margin-top:12px"><strong>Email:</strong> ${escapeHtml(c.email||'—')}</p>
+            <p class="muted"><strong>Phone:</strong> ${escapeHtml(c.phone||'—')}</p>
+            <p class="muted"><strong>Notes:</strong><br/>${escapeHtml(c.notes||'—')}</p>
+            <div style="margin-top:12px"><button class="btn" id="editFromView">Edit</button></div>
+          `
+          formWrap.appendChild(wrap)
+          document.getElementById('editFromView').onclick = ()=> openForm('edit', c.id)
+        } else {
+          formWrap.appendChild(contactForm(c))
+        }
+      }
+    }
+    function contactForm(data={}){
+      const wrapper = document.createElement('div')
+      wrapper.innerHTML = `
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="f_name" placeholder="Full name" value="${escapeHtml(data.name||'')}" />
+        </div>
+        <div class="form-row" style="margin-bottom:8px">
+          <input id="f_email" type="email" placeholder="Email" value="${escapeHtml(data.email||'')}" />
+          <input id="f_phone" type="tel" placeholder="Phone" value="${escapeHtml(data.phone||'')}" />
+        </div>
+        <div style="margin-bottom:8px"><input id="f_company" placeholder="Company" value="${escapeHtml(data.company||'')}" /></div>
+        <div style="margin-bottom:8px"><textarea id="f_notes" rows="6" placeholder="Notes">${escapeHtml(data.notes||'')}</textarea></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn ghost" id="cancelBtn">Cancel</button>
+          <button class="btn" id="saveBtn">Save</button>
+        </div>`
+      wrapper.querySelector('#cancelBtn').onclick = ()=> { activeId=null; formTitle.textContent='Contact details'; formWrap.innerHTML='<div class="muted">Select a contact or create a new one.</div>' }
+      wrapper.querySelector('#saveBtn').onclick = ()=> {
+        const payload = {
+          name: wrapper.querySelector('#f_name').value.trim(),
+          email: wrapper.querySelector('#f_email').value.trim(),
+          phone: wrapper.querySelector('#f_phone').value.trim(),
+          company: wrapper.querySelector('#f_company').value.trim(),
+          notes: wrapper.querySelector('#f_notes').value.trim()
+        }
+        if (activeId && contacts.find(x=>x.id===activeId)) {
+          // update
+          contacts = contacts.map(c => c.id===activeId ? {...c, ...payload} : c)
+        } else {
+          // create
+          contacts.push({id: uid(), created: Date.now(), ...payload})
+        }
+        save(); renderList(); activeId=null; formTitle.textContent='Contact details'; formWrap.innerHTML='<div class="muted">Saved.</div>'
+      }
+      return wrapper
+    }
+    function deleteContact(id) {
+      contacts = contacts.filter(c=>c.id!==id)
+      save(); renderList();
+      if (activeId===id){ activeId=null; formWrap.innerHTML='<div class="muted">Select a contact or create a new one.</div>' }
+    }
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]) }) }
+    // sample data
+    const SAMPLE = [
+      {id:uid(),created:Date.now()-1000000,name:'Aisha Al-Mansoori',email:'aisha@example.com',phone:'+971501234567',company:'Gulf Ventures',notes:'Potential investor, follow up next week.'},
+      {id:uid(),created:Date.now()-900000,name:'Omar Khalid',email:'omar@example.com',phone:'+971502345678',company:'Desert Logistics',notes:'Interested in API integration.'},
+      {id:uid(),created:Date.now()-800000,name:'Lina Haddad',email:'lina@example.com',phone:'+971503456789',company:'Palm Retail',notes:'Order history: 3 deals.'}
+    ]
+    // CSV helpers
+    function exportCSV(){
+      const header = ['id','name','email','phone','company','notes','created']
+      const rows = contacts.map(c => header.map(h => '"'+String(c[h]||'').replace(/"/g,'""')+'"').join(','))
+      const csv = [header.join(','), ...rows].join('\n')
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'})
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href=url; a.download='contacts.csv'; a.click(); URL.revokeObjectURL(url)
+    }
+    function importCSVText(text){
+      try{
+        const lines = text.split(/\r?\n/).filter(Boolean)
+        if (!lines.length) return
+        const header = lines.shift().split(',').map(h=>h.replace(/^"|"$/g,'').trim())
+        const newContacts = lines.map(line => {
+          // naive CSV parse for simple files
+          const parts = line.match(/(?:\"([^\"]*(?:\"\"[^\"]*)*)\"|([^,]+))/g) || []
+          // fallback: split by comma
+          const vals = parts.length ? parts.map(p=>p.replace(/^"|"$/g,'').replace(/""/g,'"')) : line.split(',')
+          const obj = {}
+          header.forEach((h,i)=> obj[h]=vals[i]||'')
+          return {id: uid(), created: Number(obj.created)||Date.now(), name: obj.name||'', email: obj.email||'', phone: obj.phone||'', company: obj.company||'', notes: obj.notes||''}
+        })
+        contacts = contacts.concat(newContacts)
+        save(); renderList()
+        alert('Imported '+newContacts.length+' contacts')
+      }catch(e){ alert('Import failed: '+e.message) }
+    }
+    // events
+    btnAdd.onclick = ()=> openForm('create')
+    btnSample.onclick = ()=> { if(confirm('Load sample contacts? This will add 3 sample contacts.')){ contacts = contacts.concat(SAMPLE); save(); renderList() } }
+    btnExport.onclick = exportCSV
+    btnImport.onclick = ()=> fileInput.click()
+    fileInput.onchange = (e)=> {
+      const f = e.target.files[0]; if(!f) return
+      const reader = new FileReader(); reader.onload = ()=> importCSVText(reader.result); reader.readAsText(f)
+    }
+    searchInput.oninput = ()=> renderList()
+    sortSelect.onchange = ()=> renderList()
+    // init
+    load(); renderList();
+    // keyboard shortcuts (N = new contact, / = focus search)
+    document.addEventListener('keydown', (e)=>{
+      //if (e.key === 'N' || e.key === 'n') { openForm('create'); }
+      if (e.key === '/') { e.preventDefault(); searchInput.focus(); }
+    })
+    // small utility for demo: clear data by visiting URL #reset
+    if (location.hash === '#reset') { localStorage.removeItem(STORAGE_KEY); contacts = []; renderList(); alert('Data cleared') }
+  </script>
+</body>
+</html>
